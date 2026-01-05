@@ -8,7 +8,6 @@ use codex_api::CompactClient as ApiCompactClient;
 use codex_api::CompactionInput as ApiCompactionInput;
 use codex_api::Prompt as ApiPrompt;
 use codex_api::RequestTelemetry;
-use codex_api::ReqwestTransport;
 use codex_api::ResponseStream as ApiResponseStream;
 use codex_api::ResponsesClient as ApiResponsesClient;
 use codex_api::ResponsesOptions as ApiResponsesOptions;
@@ -18,6 +17,8 @@ use codex_api::common::Reasoning;
 use codex_api::create_text_param_for_request;
 use codex_api::error::ApiError;
 use codex_app_server_protocol::AuthMode;
+use codex_client::AwsAuthProvider;
+use codex_client::TransportKind;
 use codex_otel::otel_manager::OtelManager;
 use codex_protocol::ConversationId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
@@ -47,6 +48,7 @@ use crate::error::CodexErr;
 use crate::error::Result;
 use crate::features::FEATURES;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
+use crate::model_provider_info::AuthType;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::models_manager::model_family::ModelFamily;
@@ -160,7 +162,7 @@ impl ModelClient {
                 .provider
                 .to_api_provider(auth.as_ref().map(|a| a.mode))?;
             let api_auth = auth_provider_from_auth(auth.clone(), &self.provider).await?;
-            let transport = ReqwestTransport::new(build_reqwest_client());
+            let transport = self.create_transport().await?;
             let (request_telemetry, sse_telemetry) = self.build_streaming_telemetry();
             let client = ApiChatClient::new(transport, api_provider, api_auth)
                 .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
@@ -249,7 +251,7 @@ impl ModelClient {
                 .provider
                 .to_api_provider(auth.as_ref().map(|a| a.mode))?;
             let api_auth = auth_provider_from_auth(auth.clone(), &self.provider).await?;
-            let transport = ReqwestTransport::new(build_reqwest_client());
+            let transport = self.create_transport().await?;
             let (request_telemetry, sse_telemetry) = self.build_streaming_telemetry();
             let client = ApiResponsesClient::new(transport, api_provider, api_auth)
                 .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
@@ -320,6 +322,31 @@ impl ModelClient {
         self.auth_manager.clone()
     }
 
+    /// Creates the appropriate transport based on the provider's auth type.
+    ///
+    /// For Bearer auth (most providers), creates a standard transport.
+    /// For AWS SigV4 auth (Bedrock), creates a signing transport.
+    async fn create_transport(&self) -> Result<TransportKind> {
+        match &self.provider.auth_type {
+            AuthType::Bearer => Ok(TransportKind::standard(build_reqwest_client())),
+            AuthType::AwsSigV4 { region, profile } => {
+                let aws_auth = AwsAuthProvider::new(region, profile.clone())
+                    .await
+                    .map_err(|e| {
+                        CodexErr::Io(std::io::Error::other(format!(
+                            "Failed to load AWS credentials: {e}"
+                        )))
+                    })?;
+                Ok(TransportKind::sigv4(
+                    build_reqwest_client(),
+                    aws_auth,
+                    "bedrock",
+                    region,
+                ))
+            }
+        }
+    }
+
     /// Compacts the current conversation history using the Compact endpoint.
     ///
     /// This is a unary call (no streaming) that returns a new list of
@@ -334,7 +361,7 @@ impl ModelClient {
             .provider
             .to_api_provider(auth.as_ref().map(|a| a.mode))?;
         let api_auth = auth_provider_from_auth(auth.clone(), &self.provider).await?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let transport = self.create_transport().await?;
         let request_telemetry = self.build_request_telemetry();
         let client = ApiCompactClient::new(transport, api_provider, api_auth)
             .with_telemetry(Some(request_telemetry));

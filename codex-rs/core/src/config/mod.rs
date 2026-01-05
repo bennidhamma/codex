@@ -3099,6 +3099,7 @@ model_verbosity = "high"
             stream_max_retries: Some(10),
             stream_idle_timeout_ms: Some(300_000),
             requires_openai_auth: false,
+            auth_type: crate::model_provider_info::AuthType::Bearer,
         };
         let model_provider_map = {
             let mut model_provider_map = built_in_model_providers();
