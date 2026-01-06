@@ -310,44 +310,13 @@ impl<'a> ChatRequestBuilder<'a> {
             }
         }
 
-        let mut payload = if provider.is_claude_provider() {
+        let payload = if provider.is_claude_provider() {
             // Bedrock uses native Anthropic message format
             // System message is separate, not in messages array
             let system_content = self.instructions;
 
             // Transform messages from OpenAI format to Claude format
-            // Write debug info to a file since TUI captures stderr
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/bedrock-debug.log") {
-                use std::io::Write;
-                let _ = writeln!(f, "\n=== Original messages (count={}) ===", messages.len());
-                for (i, msg) in messages.iter().enumerate() {
-                    let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
-                    let has_tool_calls = msg.get("tool_calls").is_some();
-                    let content_type = if msg.get("content").map(|c| c.is_null()).unwrap_or(false) {
-                        "null"
-                    } else if msg.get("content").map(|c| c.is_string()).unwrap_or(false) {
-                        "string"
-                    } else if msg.get("content").map(|c| c.is_array()).unwrap_or(false) {
-                        "array"
-                    } else {
-                        "other"
-                    };
-                    let _ = writeln!(f, "  orig[{}]: role={}, content={}, tool_calls={}", i, role, content_type, has_tool_calls);
-                }
-            }
             let bedrock_messages: Vec<Value> = transform_messages_for_claude(messages);
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/bedrock-debug.log") {
-                use std::io::Write;
-                let _ = writeln!(f, "=== Transformed messages (count={}) ===", bedrock_messages.len());
-                for (i, msg) in bedrock_messages.iter().enumerate() {
-                    let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
-                    let content_types: Vec<&str> = msg.get("content")
-                        .and_then(|c| c.as_array())
-                        .map(|arr| arr.iter().filter_map(|item| item.get("type").and_then(|t| t.as_str())).collect())
-                        .unwrap_or_default();
-                    let _ = writeln!(f, "  msg[{}]: role={}, content_types={:?}", i, role, content_types);
-                }
-            }
 
             let mut bedrock_payload = json!({
                 "anthropic_version": "bedrock-2023-05-31",
@@ -408,7 +377,7 @@ impl<'a> ChatRequestBuilder<'a> {
         };
 
         // Don't add OpenAI-specific headers for Bedrock - they cause SigV4 signing issues
-        let mut headers = if provider.is_claude_provider() {
+        let headers = if provider.is_claude_provider() {
             HeaderMap::new()
         } else {
             let mut h = build_conversation_headers(self.conversation_id);
