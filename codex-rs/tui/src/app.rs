@@ -17,6 +17,7 @@ use crate::pager_overlay::Overlay;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
 use crate::resume_picker::ResumeSelection;
+use crate::style::HIGHLIGHT;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::update_action::UpdateAction;
@@ -585,7 +586,10 @@ impl App {
                 if let Some(summary) = summary {
                     let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
                     if let Some(command) = summary.resume_command {
-                        let spans = vec!["To continue this session, run ".into(), command.cyan()];
+                        let spans = vec![
+                            "To continue this session, run ".into(),
+                            command.fg(HIGHLIGHT),
+                        ];
                         lines.push(spans.into());
                     }
                     self.chat_widget.add_plain_history_lines(lines);
@@ -642,7 +646,7 @@ impl App {
                                     if let Some(command) = summary.resume_command {
                                         let spans = vec![
                                             "To continue this session, run ".into(),
-                                            command.cyan(),
+                                            command.fg(HIGHLIGHT),
                                         ];
                                         lines.push(spans.into());
                                     }
