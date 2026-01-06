@@ -832,3 +832,200 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
     let mut h = create_history_with_items(items);
     h.normalize_history();
 }
+
+// Tests for ensure_call_outputs_adjacency
+
+#[test]
+fn ensure_call_outputs_adjacency_no_reorder_needed() {
+    // Call followed immediately by output - no reordering needed
+    let mut items = vec![
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "test".to_string(),
+            arguments: "{}".to_string(),
+            call_id: "call1".to_string(),
+        },
+        ResponseItem::FunctionCallOutput {
+            call_id: "call1".to_string(),
+            output: FunctionCallOutputPayload {
+                content: "result".to_string(),
+                ..Default::default()
+            },
+        },
+        user_msg("next message"),
+    ];
+
+    let reordered = normalize::ensure_call_outputs_adjacency(&mut items);
+
+    assert!(!reordered, "No reordering should be needed");
+    assert_eq!(items.len(), 3);
+    // Verify order is unchanged
+    assert!(matches!(&items[0], ResponseItem::FunctionCall { call_id, .. } if call_id == "call1"));
+    assert!(
+        matches!(&items[1], ResponseItem::FunctionCallOutput { call_id, .. } if call_id == "call1")
+    );
+}
+
+#[test]
+fn ensure_call_outputs_adjacency_moves_output_after_interleaved_message() {
+    // Call, then user message, then output - output should be moved
+    let mut items = vec![
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "test".to_string(),
+            arguments: "{}".to_string(),
+            call_id: "call1".to_string(),
+        },
+        user_msg("warning: something"),
+        ResponseItem::FunctionCallOutput {
+            call_id: "call1".to_string(),
+            output: FunctionCallOutputPayload {
+                content: "result".to_string(),
+                ..Default::default()
+            },
+        },
+    ];
+
+    let reordered = normalize::ensure_call_outputs_adjacency(&mut items);
+
+    assert!(reordered, "Reordering should have happened");
+    assert_eq!(items.len(), 3);
+    // After reordering: FunctionCall, FunctionCallOutput, user message
+    assert!(matches!(&items[0], ResponseItem::FunctionCall { call_id, .. } if call_id == "call1"));
+    assert!(
+        matches!(&items[1], ResponseItem::FunctionCallOutput { call_id, .. } if call_id == "call1")
+    );
+    assert!(matches!(&items[2], ResponseItem::Message { role, .. } if role == "user"));
+}
+
+#[test]
+fn ensure_call_outputs_adjacency_multiple_interleaved() {
+    // Multiple messages interleaved between call and output
+    let mut items = vec![
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "test".to_string(),
+            arguments: "{}".to_string(),
+            call_id: "call1".to_string(),
+        },
+        user_msg("warning 1"),
+        user_msg("warning 2"),
+        ResponseItem::FunctionCallOutput {
+            call_id: "call1".to_string(),
+            output: FunctionCallOutputPayload {
+                content: "result".to_string(),
+                ..Default::default()
+            },
+        },
+    ];
+
+    let reordered = normalize::ensure_call_outputs_adjacency(&mut items);
+
+    assert!(reordered, "Reordering should have happened");
+    assert_eq!(items.len(), 4);
+    // After reordering: FunctionCall, FunctionCallOutput, user message, user message
+    assert!(matches!(&items[0], ResponseItem::FunctionCall { call_id, .. } if call_id == "call1"));
+    assert!(
+        matches!(&items[1], ResponseItem::FunctionCallOutput { call_id, .. } if call_id == "call1")
+    );
+}
+
+#[test]
+fn ensure_call_outputs_adjacency_handles_custom_tool_calls() {
+    // Test with CustomToolCall and CustomToolCallOutput
+    let mut items = vec![
+        ResponseItem::CustomToolCall {
+            id: None,
+            status: None,
+            call_id: "custom1".to_string(),
+            name: "custom_tool".to_string(),
+            input: "{}".to_string(),
+        },
+        user_msg("interleaved"),
+        ResponseItem::CustomToolCallOutput {
+            call_id: "custom1".to_string(),
+            output: "custom result".to_string(),
+        },
+    ];
+
+    let reordered = normalize::ensure_call_outputs_adjacency(&mut items);
+
+    assert!(reordered, "Reordering should have happened");
+    assert!(
+        matches!(&items[0], ResponseItem::CustomToolCall { call_id, .. } if call_id == "custom1")
+    );
+    assert!(
+        matches!(&items[1], ResponseItem::CustomToolCallOutput { call_id, .. } if call_id == "custom1")
+    );
+}
+
+#[test]
+fn ensure_call_outputs_adjacency_multiple_calls() {
+    // Multiple calls with interleaved outputs
+    let mut items = vec![
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "test1".to_string(),
+            arguments: "{}".to_string(),
+            call_id: "call1".to_string(),
+        },
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "test2".to_string(),
+            arguments: "{}".to_string(),
+            call_id: "call2".to_string(),
+        },
+        user_msg("warning"),
+        ResponseItem::FunctionCallOutput {
+            call_id: "call1".to_string(),
+            output: FunctionCallOutputPayload {
+                content: "result1".to_string(),
+                ..Default::default()
+            },
+        },
+        ResponseItem::FunctionCallOutput {
+            call_id: "call2".to_string(),
+            output: FunctionCallOutputPayload {
+                content: "result2".to_string(),
+                ..Default::default()
+            },
+        },
+    ];
+
+    let reordered = normalize::ensure_call_outputs_adjacency(&mut items);
+
+    assert!(reordered, "Reordering should have happened");
+    // call1 should be followed by its output
+    // call2 should be followed by its output
+    let call1_idx = items
+        .iter()
+        .position(|i| matches!(i, ResponseItem::FunctionCall { call_id, .. } if call_id == "call1"))
+        .unwrap();
+    let output1_idx = items
+        .iter()
+        .position(
+            |i| matches!(i, ResponseItem::FunctionCallOutput { call_id, .. } if call_id == "call1"),
+        )
+        .unwrap();
+    assert_eq!(
+        output1_idx,
+        call1_idx + 1,
+        "call1 output should immediately follow call1"
+    );
+
+    let call2_idx = items
+        .iter()
+        .position(|i| matches!(i, ResponseItem::FunctionCall { call_id, .. } if call_id == "call2"))
+        .unwrap();
+    let output2_idx = items
+        .iter()
+        .position(
+            |i| matches!(i, ResponseItem::FunctionCallOutput { call_id, .. } if call_id == "call2"),
+        )
+        .unwrap();
+    assert_eq!(
+        output2_idx,
+        call2_idx + 1,
+        "call2 output should immediately follow call2"
+    );
+}

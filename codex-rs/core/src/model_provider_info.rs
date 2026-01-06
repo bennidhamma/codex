@@ -312,9 +312,7 @@ pub fn create_bedrock_provider(region: &str, profile: Option<String>) -> ModelPr
 
     ModelProviderInfo {
         name: "Bedrock".into(),
-        base_url: Some(format!(
-            "https://bedrock-runtime.{region}.amazonaws.com"
-        )),
+        base_url: Some(format!("https://bedrock-runtime.{region}.amazonaws.com")),
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,

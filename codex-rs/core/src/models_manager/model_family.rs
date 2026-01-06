@@ -386,6 +386,13 @@ pub(super) fn find_family_for_model(slug: &str) -> ModelFamily {
             truncation_policy: TruncationPolicy::Bytes(10_000),
             context_window: Some(CONTEXT_WINDOW_272K),
         )
+    } else if slug.contains(".anthropic.claude-") || slug.starts_with("claude-") {
+        // AWS Bedrock Claude models (e.g., us.anthropic.claude-opus-4-5-20251101-v1:0)
+        // or direct Anthropic API models (claude-3-opus, etc.)
+        model_family!(
+            slug, "claude",
+            context_window: Some(200_000),
+        )
     } else {
         derive_default_model_family(slug)
     }

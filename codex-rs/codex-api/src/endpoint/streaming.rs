@@ -13,6 +13,7 @@ use http::Method;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::debug;
 
 pub(crate) struct StreamingClient<T: HttpTransport, A: AuthProvider> {
     transport: T,
@@ -57,6 +58,17 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
         // Bedrock uses non-streaming invoke endpoint with JSON response
         let is_bedrock = self.provider.is_claude_provider();
 
+        // Log request details for debugging
+        if is_bedrock {
+            debug!("=== Bedrock Request ===");
+            debug!("Path: {}", path);
+            debug!("max_tokens: {:?}", body.get("max_tokens"));
+            debug!("tool_choice: {:?}", body.get("tool_choice"));
+            let tools = body.get("tools").and_then(|t| t.as_array());
+            debug!("tools count: {:?}", tools.map(|t| t.len()));
+            debug!("=== End Bedrock Request ===");
+        }
+
         let builder = || {
             let mut req = self.provider.build_request(Method::POST, path);
             req.headers.extend(extra_headers.clone());
@@ -67,10 +79,8 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
             } else {
                 "text/event-stream"
             };
-            req.headers.insert(
-                http::header::ACCEPT,
-                http::HeaderValue::from_static(accept),
-            );
+            req.headers
+                .insert(http::header::ACCEPT, http::HeaderValue::from_static(accept));
             req.body = Some(body.clone());
             add_auth_headers(&self.auth, req)
         };
