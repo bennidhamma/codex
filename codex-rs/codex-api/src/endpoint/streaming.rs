@@ -54,12 +54,22 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
         extra_headers: HeaderMap,
         spawner: fn(StreamResponse, Duration, Option<Arc<dyn SseTelemetry>>) -> ResponseStream,
     ) -> Result<ResponseStream, ApiError> {
+        // Bedrock uses non-streaming invoke endpoint with JSON response
+        let is_bedrock = self.provider.is_claude_provider();
+
         let builder = || {
             let mut req = self.provider.build_request(Method::POST, path);
             req.headers.extend(extra_headers.clone());
+
+            // Bedrock invoke returns JSON, not SSE
+            let accept = if is_bedrock {
+                "application/json"
+            } else {
+                "text/event-stream"
+            };
             req.headers.insert(
                 http::header::ACCEPT,
-                http::HeaderValue::from_static("text/event-stream"),
+                http::HeaderValue::from_static(accept),
             );
             req.body = Some(body.clone());
             add_auth_headers(&self.auth, req)
@@ -72,6 +82,11 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
             |req| self.transport.stream(req),
         )
         .await?;
+
+        // For Bedrock, we need to handle the JSON response differently
+        if is_bedrock {
+            return Ok(crate::sse::bedrock::spawn_bedrock_response(stream_response));
+        }
 
         Ok(spawner(
             stream_response,

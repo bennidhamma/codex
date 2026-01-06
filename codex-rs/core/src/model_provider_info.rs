@@ -292,12 +292,24 @@ pub const BEDROCK_PROVIDER_ID: &str = "bedrock";
 /// Default AWS region for Bedrock if not specified.
 pub const DEFAULT_BEDROCK_REGION: &str = "us-east-1";
 
+/// Beta header for Claude structured outputs feature.
+const ANTHROPIC_BETA_HEADER: &str = "structured-outputs-2025-11-13";
+
 /// Create a Bedrock provider for AWS Claude models.
 ///
 /// # Arguments
 /// * `region` - AWS region (e.g., "us-east-1")
 /// * `profile` - Optional AWS profile name
 pub fn create_bedrock_provider(region: &str, profile: Option<String>) -> ModelProviderInfo {
+    use std::collections::HashMap;
+
+    // Add anthropic-beta header for structured outputs and extended thinking support
+    let mut headers = HashMap::new();
+    headers.insert(
+        "anthropic-beta".to_string(),
+        ANTHROPIC_BETA_HEADER.to_string(),
+    );
+
     ModelProviderInfo {
         name: "Bedrock".into(),
         base_url: Some(format!(
@@ -306,10 +318,10 @@ pub fn create_bedrock_provider(region: &str, profile: Option<String>) -> ModelPr
         env_key: None,
         env_key_instructions: None,
         experimental_bearer_token: None,
-        // Bedrock uses a Chat Completions-compatible API via the Converse endpoint
+        // Bedrock uses native Anthropic message format
         wire_api: WireApi::Chat,
         query_params: None,
-        http_headers: None,
+        http_headers: Some(headers),
         env_http_headers: None,
         request_max_retries: None,
         stream_max_retries: None,

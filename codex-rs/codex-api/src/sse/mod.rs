@@ -1,3 +1,4 @@
+pub mod bedrock;
 pub mod chat;
 pub mod responses;
 

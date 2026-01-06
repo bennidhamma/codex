@@ -237,7 +237,7 @@ wiremock = "0.6"
 zeroize = "1.8.2"
 
 # AWS
-aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls", "rt-tokio"] }
 aws-credential-types = "1"
 aws-sigv4 = "1"
 aws-smithy-runtime-api = "1"
