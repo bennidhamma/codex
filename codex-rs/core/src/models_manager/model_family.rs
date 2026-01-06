@@ -391,6 +391,9 @@ pub(super) fn find_family_for_model(slug: &str) -> ModelFamily {
         // or direct Anthropic API models (claude-3-opus, etc.)
         model_family!(
             slug, "claude",
+            apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+            shell_type: ConfigShellToolType::ShellCommand,
+            supports_parallel_tool_calls: true,
             context_window: Some(200_000),
         )
     } else {
