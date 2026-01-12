@@ -436,3 +436,31 @@ macro_rules! skip_if_windows {
         }
     }};
 }
+
+/// Check if landlock is available on this Linux system.
+/// Returns true if landlock is in the kernel's LSM list.
+#[cfg(target_os = "linux")]
+pub fn is_landlock_available() -> bool {
+    std::fs::read_to_string("/sys/kernel/security/lsm")
+        .map(|lsm| lsm.split(',').any(|s| s.trim() == "landlock"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_landlock_available() -> bool {
+    false
+}
+
+#[macro_export]
+macro_rules! skip_if_no_landlock {
+    () => {{
+        #[cfg(target_os = "linux")]
+        if !$crate::is_landlock_available() {
+            eprintln!(
+                "Skipping test: landlock is not enabled in the kernel's LSM list. \
+                Add 'landlock' to the 'lsm=' boot parameter to enable."
+            );
+            return;
+        }
+    }};
+}
