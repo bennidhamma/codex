@@ -189,6 +189,12 @@ fn maybe_push_chat_wire_api_deprecation(
         return;
     }
 
+    // Don't show deprecation warning for Bedrock - it requires Chat wire API
+    // (the Responses API is OpenAI-specific and not supported by Bedrock)
+    if config.model_provider.is_bedrock() {
+        return;
+    }
+
     if CHAT_WIRE_API_DEPRECATION_EMITTED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -2300,7 +2306,18 @@ pub(crate) async fn run_task(
         let turn_input: Vec<ResponseItem> = {
             sess.record_conversation_items(&turn_context, &pending_input)
                 .await;
-            sess.clone_history().await.get_history_for_prompt()
+            let (history, reordered) = sess
+                .clone_history()
+                .await
+                .get_history_for_prompt_with_reorder_info();
+
+            // Note: reordering is handled silently. We used to add a warning here,
+            // but it was being added as a user message which polluted the conversation
+            // and confused the model. The reordering is logged via tracing::warn! in
+            // normalize.rs for debugging purposes.
+            let _ = reordered; // suppress unused warning
+
+            history
         };
 
         let turn_input_messages = turn_input

@@ -14,6 +14,7 @@ use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
 use crate::render::renderable::Renderable;
 use crate::shimmer::shimmer_spans;
+use crate::style::HIGHLIGHT;
 use crate::style::user_message_style;
 use crate::text_formatting::format_and_truncate_tool_result;
 use crate::text_formatting::truncate_text;
@@ -305,19 +306,23 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         use ratatui_macros::line;
         use ratatui_macros::text;
         let update_instruction = if let Some(update_action) = self.update_action {
-            line!["Run ", update_action.command_str().cyan(), " to update."]
+            line![
+                "Run ",
+                update_action.command_str().fg(HIGHLIGHT),
+                " to update."
+            ]
         } else {
             line![
                 "See ",
-                "https://github.com/openai/codex".cyan().underlined(),
+                "https://github.com/openai/codex".fg(HIGHLIGHT).underlined(),
                 " for installation options."
             ]
         };
 
         let content = text![
             line![
-                padded_emoji("✨").bold().cyan(),
-                "Update available!".bold().cyan(),
+                padded_emoji("✨").bold().fg(HIGHLIGHT),
+                "Update available!".bold().fg(HIGHLIGHT),
                 " ",
                 format!("{CODEX_CLI_VERSION} -> {}", self.latest_version).bold(),
             ],
@@ -325,7 +330,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             "",
             "See full release notes:",
             "https://github.com/openai/codex/releases/latest"
-                .cyan()
+                .fg(HIGHLIGHT)
                 .underlined(),
         ];
 
@@ -582,10 +587,17 @@ impl HistoryCell for UnifiedExecSessionsCell {
             if needs_suffix && budget > truncation_suffix_width {
                 let available = budget.saturating_sub(truncation_suffix_width);
                 let (truncated, _, _) = take_prefix_by_width(&snippet, available);
-                out.push(vec![prefix.dim(), truncated.cyan(), truncation_suffix.dim()].into());
+                out.push(
+                    vec![
+                        prefix.dim(),
+                        truncated.fg(HIGHLIGHT),
+                        truncation_suffix.dim(),
+                    ]
+                    .into(),
+                );
             } else {
                 let (truncated, _, _) = take_prefix_by_width(&snippet, budget);
-                out.push(vec![prefix.dim(), truncated.cyan()].into());
+                out.push(vec![prefix.dim(), truncated.fg(HIGHLIGHT)].into());
             }
             shown += 1;
         }
@@ -712,7 +724,7 @@ pub fn new_approval_decision_cell(
 /// Cyan history cell line showing the current review status.
 pub(crate) fn new_review_status_line(message: String) -> PlainHistoryCell {
     PlainHistoryCell {
-        lines: vec![Line::from(message.cyan())],
+        lines: vec![Line::from(message.fg(HIGHLIGHT))],
     }
 }
 
@@ -1035,7 +1047,7 @@ impl HistoryCell for SessionHeaderHistoryCell {
             model_spans.push(Span::from(reasoning));
         }
         model_spans.push("   ".dim());
-        model_spans.push(CHANGE_MODEL_HINT_COMMAND.cyan());
+        model_spans.push(CHANGE_MODEL_HINT_COMMAND.fg(HIGHLIGHT));
         model_spans.push(CHANGE_MODEL_HINT_EXPLANATION.dim());
 
         let dir_label = format!("{DIR_LABEL:<label_width$}");
@@ -1569,7 +1581,7 @@ impl HistoryCell for PlanUpdateCell {
         let render_step = |status: &StepStatus, text: &str| -> Vec<Line<'static>> {
             let (box_str, step_style) = match status {
                 StepStatus::Completed => ("✔ ", Style::default().crossed_out().dim()),
-                StepStatus::InProgress => ("□ ", Style::default().cyan().bold()),
+                StepStatus::InProgress => ("□ ", Style::default().fg(HIGHLIGHT).bold()),
                 StepStatus::Pending => ("□ ", Style::default().dim()),
             };
             let wrap_width = (width as usize)
@@ -1727,9 +1739,9 @@ fn format_mcp_invocation<'a>(invocation: McpInvocation) -> Line<'a> {
         .unwrap_or_default();
 
     let invocation_spans = vec![
-        invocation.server.clone().cyan(),
+        invocation.server.clone().fg(HIGHLIGHT),
         ".".into(),
-        invocation.tool.cyan(),
+        invocation.tool.fg(HIGHLIGHT),
         "(".into(),
         args_str.dim(),
         ")".into(),

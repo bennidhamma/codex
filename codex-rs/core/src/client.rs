@@ -4,20 +4,24 @@ use crate::api_bridge::auth_provider_from_auth;
 use crate::api_bridge::map_api_error;
 use codex_api::AggregateStreamExt;
 use codex_api::ChatClient as ApiChatClient;
+use codex_api::ChatRequestBuilder;
 use codex_api::CompactClient as ApiCompactClient;
 use codex_api::CompactionInput as ApiCompactionInput;
 use codex_api::Prompt as ApiPrompt;
 use codex_api::RequestTelemetry;
-use codex_api::ReqwestTransport;
 use codex_api::ResponseStream as ApiResponseStream;
 use codex_api::ResponsesClient as ApiResponsesClient;
 use codex_api::ResponsesOptions as ApiResponsesOptions;
 use codex_api::SseTelemetry;
 use codex_api::TransportError;
+use codex_api::common::ClaudeThinking;
 use codex_api::common::Reasoning;
+use codex_api::common::effort_to_budget_tokens;
 use codex_api::create_text_param_for_request;
 use codex_api::error::ApiError;
 use codex_app_server_protocol::AuthMode;
+use codex_client::AwsAuthProvider;
+use codex_client::TransportKind;
 use codex_otel::otel_manager::OtelManager;
 use codex_protocol::ConversationId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
@@ -47,6 +51,7 @@ use crate::error::CodexErr;
 use crate::error::Result;
 use crate::features::FEATURES;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
+use crate::model_provider_info::AuthType;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::models_manager::model_family::ModelFamily;
@@ -134,24 +139,46 @@ impl ModelClient {
         }
     }
 
-    /// Streams a turn via the OpenAI Chat Completions API.
+    /// Streams a turn via the Chat Completions API.
     ///
-    /// This path is only used when the provider is configured with
-    /// `WireApi::Chat`; it does not support `output_schema` today.
+    /// This path is used when the provider is configured with `WireApi::Chat`.
+    /// For Claude/Anthropic providers (Bedrock), this supports:
+    /// - Structured output via `output_format` parameter
+    /// - Extended thinking via `thinking` parameter
     async fn stream_chat_completions(&self, prompt: &Prompt) -> Result<ApiResponseStream> {
-        if prompt.output_schema.is_some() {
-            return Err(CodexErr::UnsupportedOperation(
-                "output_schema is not supported for Chat Completions API".to_string(),
-            ));
-        }
-
         let auth_manager = self.auth_manager.clone();
         let model_family = self.get_model_family();
         let instructions = prompt.get_full_instructions(&model_family).into_owned();
         let tools_json = create_tools_json_for_chat_completions_api(&prompt.tools)?;
-        let api_prompt = build_api_prompt(prompt, instructions, tools_json);
         let conversation_id = self.conversation_id.to_string();
         let session_source = self.session_source.clone();
+
+        // Determine Claude-specific features based on provider
+        let is_claude = self.provider.is_bedrock();
+
+        // For non-Claude providers, output_schema is still unsupported
+        if prompt.output_schema.is_some() && !is_claude {
+            return Err(CodexErr::UnsupportedOperation(
+                "output_schema is not supported for Chat Completions API (only Claude/Bedrock)"
+                    .to_string(),
+            ));
+        }
+
+        // Build Claude extended thinking configuration if effort is set
+        let thinking = if is_claude {
+            self.effort
+                .and_then(effort_to_budget_tokens)
+                .map(ClaudeThinking::enabled)
+        } else {
+            None
+        };
+
+        // Get output_schema for Claude providers
+        let output_schema = if is_claude {
+            prompt.output_schema.clone()
+        } else {
+            None
+        };
 
         let mut refreshed = false;
         loop {
@@ -160,19 +187,26 @@ impl ModelClient {
                 .provider
                 .to_api_provider(auth.as_ref().map(|a| a.mode))?;
             let api_auth = auth_provider_from_auth(auth.clone(), &self.provider).await?;
-            let transport = ReqwestTransport::new(build_reqwest_client());
+            let transport = self.create_transport().await?;
             let (request_telemetry, sse_telemetry) = self.build_streaming_telemetry();
-            let client = ApiChatClient::new(transport, api_provider, api_auth)
+            let client = ApiChatClient::new(transport, api_provider.clone(), api_auth)
                 .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
 
-            let stream_result = client
-                .stream_prompt(
-                    &self.get_model(),
-                    &api_prompt,
-                    Some(conversation_id.clone()),
-                    Some(session_source.clone()),
-                )
-                .await;
+            // Build request with Claude-specific features
+            let request = ChatRequestBuilder::new(
+                &self.get_model(),
+                &instructions,
+                &prompt.input,
+                &tools_json,
+            )
+            .conversation_id(Some(conversation_id.clone()))
+            .session_source(Some(session_source.clone()))
+            .output_schema(output_schema.clone())
+            .thinking(thinking.clone())
+            .build(&api_provider)
+            .map_err(map_api_error)?;
+
+            let stream_result = client.stream_request(request).await;
 
             match stream_result {
                 Ok(stream) => return Ok(stream),
@@ -249,7 +283,7 @@ impl ModelClient {
                 .provider
                 .to_api_provider(auth.as_ref().map(|a| a.mode))?;
             let api_auth = auth_provider_from_auth(auth.clone(), &self.provider).await?;
-            let transport = ReqwestTransport::new(build_reqwest_client());
+            let transport = self.create_transport().await?;
             let (request_telemetry, sse_telemetry) = self.build_streaming_telemetry();
             let client = ApiResponsesClient::new(transport, api_provider, api_auth)
                 .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
@@ -320,6 +354,38 @@ impl ModelClient {
         self.auth_manager.clone()
     }
 
+    /// Creates the appropriate transport based on the provider's auth type.
+    ///
+    /// For Bearer auth (most providers), creates a standard transport.
+    /// For AWS SigV4 auth (Bedrock), creates a signing transport.
+    async fn create_transport(&self) -> Result<TransportKind> {
+        match &self.provider.auth_type {
+            AuthType::Bearer => Ok(TransportKind::standard(build_reqwest_client())),
+            AuthType::AwsSigV4 { region, profile } => {
+                tracing::debug!(
+                    "Creating AWS auth provider: region={}, profile={:?}",
+                    region,
+                    profile
+                );
+                let aws_auth = AwsAuthProvider::new(region, profile.clone())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("AWS credentials error: {e}");
+                        CodexErr::Io(std::io::Error::other(format!(
+                            "Failed to load AWS credentials: {e}"
+                        )))
+                    })?;
+                tracing::debug!("AWS credentials loaded successfully");
+                Ok(TransportKind::sigv4(
+                    build_reqwest_client(),
+                    aws_auth,
+                    "bedrock",
+                    region,
+                ))
+            }
+        }
+    }
+
     /// Compacts the current conversation history using the Compact endpoint.
     ///
     /// This is a unary call (no streaming) that returns a new list of
@@ -334,7 +400,7 @@ impl ModelClient {
             .provider
             .to_api_provider(auth.as_ref().map(|a| a.mode))?;
         let api_auth = auth_provider_from_auth(auth.clone(), &self.provider).await?;
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let transport = self.create_transport().await?;
         let request_telemetry = self.build_request_telemetry();
         let client = ApiCompactClient::new(transport, api_provider, api_auth)
             .with_telemetry(Some(request_telemetry));

@@ -67,10 +67,18 @@ impl<T: HttpTransport, A: AuthProvider> ChatClient<T, A> {
         self.stream_request(request).await
     }
 
-    fn path(&self) -> &'static str {
-        match self.streaming.provider().wire {
-            WireApi::Chat => "chat/completions",
-            _ => "responses",
+    fn path(&self, model: Option<&str>) -> String {
+        let provider = self.streaming.provider();
+
+        // Bedrock uses /model/{modelId}/invoke-with-response-stream for streaming
+        if provider.is_claude_provider()
+            && let Some(model_id) = model {
+                return format!("model/{model_id}/invoke-with-response-stream");
+            }
+
+        match provider.wire {
+            WireApi::Chat => "chat/completions".to_string(),
+            _ => "responses".to_string(),
         }
     }
 
@@ -79,8 +87,23 @@ impl<T: HttpTransport, A: AuthProvider> ChatClient<T, A> {
         body: Value,
         extra_headers: HeaderMap,
     ) -> Result<ResponseStream, ApiError> {
+        // Extract model from body for Bedrock path construction
+        let model = body.get("model").and_then(|m| m.as_str());
+        let path = self.path(model);
+
+        // For Bedrock, remove the model field from body (it's in the URL path)
+        let body = if self.streaming.provider().is_claude_provider() {
+            let mut body = body;
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("model");
+            }
+            body
+        } else {
+            body
+        };
+
         self.streaming
-            .stream(self.path(), body, extra_headers, spawn_chat_stream)
+            .stream(&path, body, extra_headers, spawn_chat_stream)
             .await
     }
 }

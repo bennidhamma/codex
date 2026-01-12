@@ -1,3 +1,4 @@
+use crate::style::HIGHLIGHT;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
@@ -719,7 +720,7 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
 
         // Header
         frame.render_widget_ref(
-            Line::from(vec!["Resume a previous session".bold().cyan()]),
+            Line::from(vec!["Resume a previous session".bold().fg(HIGHLIGHT)]),
             header,
         );
 
@@ -810,7 +811,7 @@ fn render_list(
                 .dim(),
             )
         } else {
-            Some(Span::from(format!("{branch_label:<max_branch_width$}")).cyan())
+            Some(Span::from(format!("{branch_label:<max_branch_width$}")).fg(HIGHLIGHT))
         };
         let cwd_span = if max_cwd_width == 0 {
             None
@@ -1391,7 +1392,7 @@ mod tests {
             .areas(area);
 
             frame.render_widget_ref(
-                Line::from(vec!["Resume a previous session".bold().cyan()]),
+                Line::from(vec!["Resume a previous session".bold().fg(HIGHLIGHT)]),
                 header,
             );
 

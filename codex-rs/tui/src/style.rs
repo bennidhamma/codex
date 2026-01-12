@@ -5,6 +5,11 @@ use crate::terminal_palette::default_bg;
 use ratatui::style::Color;
 use ratatui::style::Style;
 
+/// The highlight color used for selections, user input tips, and status indicators.
+/// rgb(213, 240, 216) - a soft green.
+#[allow(clippy::disallowed_methods)]
+pub const HIGHLIGHT: Color = Color::Rgb(213, 240, 216);
+
 pub fn user_message_style() -> Style {
     user_message_style_for(default_bg())
 }
