@@ -65,7 +65,7 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
             debug!("max_tokens: {:?}", body.get("max_tokens"));
             debug!("tool_choice: {:?}", body.get("tool_choice"));
             let tools = body.get("tools").and_then(|t| t.as_array());
-            debug!("tools count: {:?}", tools.map(|t| t.len()));
+            debug!("tools count: {:?}", tools.map(std::vec::Vec::len));
             debug!("=== End Bedrock Request ===");
         }
 
@@ -73,9 +73,9 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
             let mut req = self.provider.build_request(Method::POST, path);
             req.headers.extend(extra_headers.clone());
 
-            // Bedrock invoke returns JSON, not SSE
+            // Bedrock streaming uses AWS Event Stream format
             let accept = if is_bedrock {
-                "application/json"
+                "application/vnd.amazon.eventstream"
             } else {
                 "text/event-stream"
             };
@@ -93,9 +93,11 @@ impl<T: HttpTransport, A: AuthProvider> StreamingClient<T, A> {
         )
         .await?;
 
-        // For Bedrock, we need to handle the JSON response differently
+        // For Bedrock, use the streaming event stream handler
         if is_bedrock {
-            return Ok(crate::sse::bedrock::spawn_bedrock_response(stream_response));
+            return Ok(crate::sse::bedrock_stream::spawn_bedrock_stream(
+                stream_response,
+            ));
         }
 
         Ok(spawner(

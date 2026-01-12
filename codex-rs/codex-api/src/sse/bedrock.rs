@@ -37,8 +37,7 @@ async fn process_bedrock_response<S>(
             Err(e) => {
                 let _ = tx_event
                     .send(Err(ApiError::Stream(format!(
-                        "Error reading response: {}",
-                        e
+                        "Error reading response: {e}"
                     ))))
                     .await;
                 return;
@@ -57,8 +56,7 @@ async fn process_bedrock_response<S>(
             );
             let _ = tx_event
                 .send(Err(ApiError::Stream(format!(
-                    "Failed to parse Bedrock response: {}",
-                    e
+                    "Failed to parse Bedrock response: {e}"
                 ))))
                 .await;
             return;
@@ -68,7 +66,7 @@ async fn process_bedrock_response<S>(
     // Check for error response
     if let Some(message) = response.get("message").and_then(|m| m.as_str()) {
         let _ = tx_event
-            .send(Err(ApiError::Stream(format!("Bedrock error: {}", message))))
+            .send(Err(ApiError::Stream(format!("Bedrock error: {message}"))))
             .await;
         return;
     }
@@ -93,7 +91,7 @@ async fn process_bedrock_response<S>(
     debug!(
         "Bedrock response: stop_reason={:?}, content_items={}",
         stop_reason,
-        content.map(|c| c.len()).unwrap_or(0)
+        content.map(std::vec::Vec::len).unwrap_or(0)
     );
     // Log usage info to see how many tokens were generated
     if let Some(usage) = response.get("usage") {
@@ -112,8 +110,8 @@ async fn process_bedrock_response<S>(
         debug!("Bedrock content types: {:?}", types);
         // Log text content details, especially for end_turn cases
         for item in items {
-            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+            if item.get("type").and_then(|t| t.as_str()) == Some("text")
+                && let Some(text) = item.get("text").and_then(|t| t.as_str()) {
                     let has_tool_intent = text.to_lowercase().contains("let me")
                         || text.contains("I'll")
                         || text.contains("I will")
@@ -137,7 +135,6 @@ async fn process_bedrock_response<S>(
                         debug!("end_turn text content: {}", preview);
                     }
                 }
-            }
         }
     }
 
@@ -231,7 +228,7 @@ async fn process_bedrock_response<S>(
         // Bedrock also provides cache_read_input_tokens for prompt caching
         let cached_input_tokens = usage
             .get("cache_read_input_tokens")
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(0);
         Some(TokenUsage {
             input_tokens,

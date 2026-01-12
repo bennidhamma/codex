@@ -368,19 +368,19 @@ impl<'a> ChatRequestBuilder<'a> {
                                     let id = item.get("id").and_then(|i| i.as_str()).unwrap_or("?");
                                     let name =
                                         item.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                                    format!("tool_use(id={}, name={})", id, name)
+                                    format!("tool_use(id={id}, name={name})")
                                 } else if t == "tool_result" {
                                     let id = item
                                         .get("tool_use_id")
                                         .and_then(|i| i.as_str())
                                         .unwrap_or("?");
-                                    format!("tool_result(tool_use_id={})", id)
+                                    format!("tool_result(tool_use_id={id})")
                                 } else if t == "text" {
                                     let text =
                                         item.get("text").and_then(|t| t.as_str()).unwrap_or("");
                                     format!("text(len={})", text.len())
                                 } else {
-                                    format!("{}(...)", t)
+                                    format!("{t}(...)")
                                 }
                             })
                             .collect();
@@ -408,15 +408,14 @@ impl<'a> ChatRequestBuilder<'a> {
                     .filter_map(|tool| {
                         // OpenAI format: { "type": "function", "function": { "name", "description", "parameters" } }
                         // Claude format: { "name", "description", "input_schema" }
-                        if tool.get("type").and_then(|t| t.as_str()) == Some("function") {
-                            if let Some(func) = tool.get("function") {
+                        if tool.get("type").and_then(|t| t.as_str()) == Some("function")
+                            && let Some(func) = tool.get("function") {
                                 return Some(json!({
                                     "name": func.get("name"),
                                     "description": func.get("description"),
                                     "input_schema": func.get("parameters")
                                 }));
                             }
-                        }
                         // If already in Claude format or unknown, pass through
                         Some(tool.clone())
                     })
@@ -640,13 +639,11 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                     if let Some(arr) = content.as_array() {
                         for item in arr {
                             // Skip text items that are empty or whitespace-only
-                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                                    if text.trim().is_empty() {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text")
+                                && let Some(text) = item.get("text").and_then(|t| t.as_str())
+                                    && text.trim().is_empty() {
                                         continue;
                                     }
-                                }
-                            }
                             pending_assistant_content.push(item.clone());
                         }
                     }
@@ -732,11 +729,10 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                             match item_type {
                                 Some("text") => {
                                     // Skip text items that are empty or whitespace-only
-                                    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                                        if text.trim().is_empty() {
+                                    if let Some(text) = item.get("text").and_then(|t| t.as_str())
+                                        && text.trim().is_empty() {
                                             continue;
                                         }
-                                    }
                                     pending_user_content.push(item.clone());
                                 }
                                 Some("image_url") => {
@@ -745,9 +741,8 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                                         .get("image_url")
                                         .and_then(|u| u.get("url"))
                                         .and_then(|u| u.as_str())
-                                    {
-                                        if url.starts_with("data:") {
-                                            if let Some(comma_pos) = url.find(',') {
+                                        && url.starts_with("data:")
+                                            && let Some(comma_pos) = url.find(',') {
                                                 let header = &url[5..comma_pos];
                                                 let data = &url[comma_pos + 1..];
                                                 let media_type =
@@ -761,8 +756,6 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                                                     }
                                                 }));
                                             }
-                                        }
-                                    }
                                 }
                                 _ => {
                                     pending_user_content.push(item.clone());
@@ -826,7 +819,7 @@ fn validate_tool_pairing(messages: &[Value]) {
                 .iter()
                 .filter_map(|item| item.get("type").and_then(|t| t.as_str()))
                 .collect();
-            format!("{:?}", types)
+            format!("{types:?}")
         } else if let Some(s) = content.and_then(|c| c.as_str()) {
             format!("text({})", s.len().min(50))
         } else {
