@@ -1,8 +1,8 @@
+use crate::style::HIGHLIGHT;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 // Note: Table-based layout previously used Constraint; the manual renderer
 // below no longer requires it.
-use ratatui::style::Color;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -272,10 +272,10 @@ pub(crate) fn render_rows(
 
         let mut full_line = build_full_line(row, desc_col);
         if Some(i) == state.selected_idx {
-            // Match previous behavior: cyan + bold for the selected row.
+            // Match previous behavior: HIGHLIGHT + bold for the selected row.
             // Reset the style first to avoid inheriting dim from keyboard shortcuts.
             full_line.spans.iter_mut().for_each(|span| {
-                span.style = Style::default().fg(Color::Cyan).bold();
+                span.style = Style::default().fg(HIGHLIGHT).bold();
             });
         }
 
@@ -355,7 +355,7 @@ pub(crate) fn render_rows_single_line(
         let mut full_line = build_full_line(row, desc_col);
         if Some(i) == state.selected_idx {
             full_line.spans.iter_mut().for_each(|span| {
-                span.style = Style::default().fg(Color::Cyan).bold();
+                span.style = Style::default().fg(HIGHLIGHT).bold();
             });
         }
 

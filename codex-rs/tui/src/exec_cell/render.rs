@@ -1,3 +1,4 @@
+use crate::style::HIGHLIGHT;
 use std::time::Instant;
 
 use super::model::CommandOutput;
@@ -339,7 +340,7 @@ impl ExecCell {
 
             for (title, line) in call_lines {
                 let line = Line::from(line);
-                let initial_indent = Line::from(vec![title.cyan(), " ".into()]);
+                let initial_indent = Line::from(vec![title.fg(HIGHLIGHT), " ".into()]);
                 let subsequent_indent = " ".repeat(initial_indent.width()).into();
                 let wrapped = word_wrap_line(
                     &line,

@@ -44,6 +44,31 @@ npx @modelcontextprotocol/inspector codex mcp-server
 
 Use `codex mcp` to add/list/get/remove MCP server launchers defined in `config.toml`, and `codex mcp-server` to run the MCP server directly.
 
+### AWS Bedrock Support
+
+Codex now supports native AWS Bedrock as a model provider, allowing you to use Claude and other models hosted on AWS infrastructure. This includes:
+
+- **SigV4 signing**: Automatic AWS request signing using your configured credentials
+- **Claude compatibility**: Full support for Claude models via Bedrock with proper `tool_use`/`tool_result` message handling
+
+To use Bedrock, configure your `~/.codex/config.toml`:
+
+```toml
+model_provider = "bedrock"
+model = "anthropic.claude-sonnet-4-20250514-v1:0"  # or other Bedrock model IDs
+```
+
+Ensure your AWS credentials are configured via environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) or through the standard AWS credential chain.
+
+### Claude Model Support
+
+When using Claude models (via Bedrock or other providers), Codex automatically:
+
+- Configures the appropriate model family settings
+- Provides the `apply_patch` tool for file editing (Claude's preferred editing mechanism)
+- Transforms message formats for Claude API compatibility
+- Prevents use of sed/awk for file editing in favor of structured patch operations
+
 ### Notifications
 
 You can enable notifications by configuring a script that is run whenever the agent finishes a turn. The [notify documentation](../docs/config.md#notify) includes a detailed example that explains how to get desktop notifications via [terminal-notifier](https://github.com/julienXX/terminal-notifier) on macOS. When Codex detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.

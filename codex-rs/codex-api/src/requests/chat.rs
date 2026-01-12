@@ -13,6 +13,9 @@ use http::HeaderMap;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use tracing::debug;
+use tracing::warn;
 
 /// Assembled request body plus headers for Chat Completions streaming calls.
 pub struct ChatRequest {
@@ -310,48 +313,89 @@ impl<'a> ChatRequestBuilder<'a> {
             }
         }
 
-        let mut payload = if provider.is_claude_provider() {
+        let payload = if provider.is_claude_provider() {
             // Bedrock uses native Anthropic message format
             // System message is separate, not in messages array
             let system_content = self.instructions;
 
+            // Log input items for debugging
+            debug!("=== Raw Input Items ({} total) ===", input.len());
+            for (idx, item) in input.iter().enumerate() {
+                match item {
+                    ResponseItem::FunctionCall { call_id, name, .. } => {
+                        debug!(
+                            "  [{}] FunctionCall: name={}, call_id={}",
+                            idx, name, call_id
+                        );
+                    }
+                    ResponseItem::FunctionCallOutput { call_id, .. } => {
+                        debug!("  [{}] FunctionCallOutput: call_id={}", idx, call_id);
+                    }
+                    ResponseItem::Message { role, .. } => {
+                        debug!("  [{}] Message: role={}", idx, role);
+                    }
+                    ResponseItem::LocalShellCall { call_id, .. } => {
+                        debug!("  [{}] LocalShellCall: call_id={:?}", idx, call_id);
+                    }
+                    ResponseItem::Reasoning { .. } => {
+                        debug!("  [{}] Reasoning", idx);
+                    }
+                    _ => {
+                        debug!("  [{}] Other", idx);
+                    }
+                }
+            }
+            debug!("=== End Raw Input Items ===");
+
             // Transform messages from OpenAI format to Claude format
-            // Write debug info to a file since TUI captures stderr
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/bedrock-debug.log") {
-                use std::io::Write;
-                let _ = writeln!(f, "\n=== Original messages (count={}) ===", messages.len());
-                for (i, msg) in messages.iter().enumerate() {
-                    let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
-                    let has_tool_calls = msg.get("tool_calls").is_some();
-                    let content_type = if msg.get("content").map(|c| c.is_null()).unwrap_or(false) {
-                        "null"
-                    } else if msg.get("content").map(|c| c.is_string()).unwrap_or(false) {
-                        "string"
-                    } else if msg.get("content").map(|c| c.is_array()).unwrap_or(false) {
-                        "array"
-                    } else {
-                        "other"
-                    };
-                    let _ = writeln!(f, "  orig[{}]: role={}, content={}, tool_calls={}", i, role, content_type, has_tool_calls);
-                }
-            }
             let bedrock_messages: Vec<Value> = transform_messages_for_claude(messages);
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/bedrock-debug.log") {
-                use std::io::Write;
-                let _ = writeln!(f, "=== Transformed messages (count={}) ===", bedrock_messages.len());
-                for (i, msg) in bedrock_messages.iter().enumerate() {
-                    let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
-                    let content_types: Vec<&str> = msg.get("content")
-                        .and_then(|c| c.as_array())
-                        .map(|arr| arr.iter().filter_map(|item| item.get("type").and_then(|t| t.as_str())).collect())
-                        .unwrap_or_default();
-                    let _ = writeln!(f, "  msg[{}]: role={}, content_types={:?}", i, role, content_types);
-                }
+
+            // Log the final messages being sent to Bedrock
+            debug!(
+                "=== Final Bedrock Messages ({} total) ===",
+                bedrock_messages.len()
+            );
+            for (idx, msg) in bedrock_messages.iter().enumerate() {
+                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+                let content = msg.get("content");
+                let content_preview = match content {
+                    Some(Value::Array(arr)) => {
+                        let items: Vec<String> = arr
+                            .iter()
+                            .map(|item| {
+                                let t = item.get("type").and_then(|t| t.as_str()).unwrap_or("?");
+                                if t == "tool_use" {
+                                    let id = item.get("id").and_then(|i| i.as_str()).unwrap_or("?");
+                                    let name =
+                                        item.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                                    format!("tool_use(id={id}, name={name})")
+                                } else if t == "tool_result" {
+                                    let id = item
+                                        .get("tool_use_id")
+                                        .and_then(|i| i.as_str())
+                                        .unwrap_or("?");
+                                    format!("tool_result(tool_use_id={id})")
+                                } else if t == "text" {
+                                    let text =
+                                        item.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                                    format!("text(len={})", text.len())
+                                } else {
+                                    format!("{t}(...)")
+                                }
+                            })
+                            .collect();
+                        format!("[{}]", items.join(", "))
+                    }
+                    Some(Value::String(s)) => format!("\"{}...\"", &s[..s.len().min(50)]),
+                    _ => "null".to_string(),
+                };
+                debug!("  [{}] role={}: {}", idx, role, content_preview);
             }
+            debug!("=== End Bedrock Messages ===");
 
             let mut bedrock_payload = json!({
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 8192,
+                "max_tokens": 16384,
                 "system": system_content,
                 "messages": bedrock_messages,
             });
@@ -364,20 +408,21 @@ impl<'a> ChatRequestBuilder<'a> {
                     .filter_map(|tool| {
                         // OpenAI format: { "type": "function", "function": { "name", "description", "parameters" } }
                         // Claude format: { "name", "description", "input_schema" }
-                        if tool.get("type").and_then(|t| t.as_str()) == Some("function") {
-                            if let Some(func) = tool.get("function") {
+                        if tool.get("type").and_then(|t| t.as_str()) == Some("function")
+                            && let Some(func) = tool.get("function") {
                                 return Some(json!({
                                     "name": func.get("name"),
                                     "description": func.get("description"),
                                     "input_schema": func.get("parameters")
                                 }));
                             }
-                        }
                         // If already in Claude format or unknown, pass through
                         Some(tool.clone())
                     })
                     .collect();
                 bedrock_payload["tools"] = json!(claude_tools);
+                // Explicitly set tool_choice to "auto" so Claude can decide when to use tools
+                bedrock_payload["tool_choice"] = json!({"type": "auto"});
             }
 
             // Add structured output schema as output_format
@@ -408,7 +453,7 @@ impl<'a> ChatRequestBuilder<'a> {
         };
 
         // Don't add OpenAI-specific headers for Bedrock - they cause SigV4 signing issues
-        let mut headers = if provider.is_claude_provider() {
+        let headers = if provider.is_claude_provider() {
             HeaderMap::new()
         } else {
             let mut h = build_conversation_headers(self.conversation_id);
@@ -492,11 +537,17 @@ fn sort_assistant_content(content: &mut Vec<Value>) {
 /// - tool_result to IMMEDIATELY follow tool_use
 /// - text content should come before tool_use blocks
 /// So we must merge consecutive messages of the same role.
+///
+/// IMPORTANT: User messages may appear between tool_calls and tool_results
+/// (e.g., warnings). We must defer flushing assistant content with tool_use
+/// until we have the corresponding tool_results.
 fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
     let mut result: Vec<Value> = Vec::new();
     let mut pending_tool_results: Vec<Value> = Vec::new();
     let mut pending_assistant_content: Vec<Value> = Vec::new();
     let mut pending_user_content: Vec<Value> = Vec::new();
+    // Track tool_use IDs that are waiting for tool_results
+    let mut pending_tool_use_ids: HashSet<String> = HashSet::new();
 
     for msg in messages {
         let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
@@ -507,21 +558,15 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                 continue;
             }
             "tool" => {
-                // Flush any pending assistant content before tool results
-                if !pending_assistant_content.is_empty() {
-                    sort_assistant_content(&mut pending_assistant_content);
-                    result.push(json!({
-                        "role": "assistant",
-                        "content": std::mem::take(&mut pending_assistant_content)
-                    }));
-                }
-
                 // Collect tool results - they'll be merged into a single user message
                 let tool_call_id = msg
                     .get("tool_call_id")
                     .and_then(|i| i.as_str())
                     .unwrap_or("");
                 let content = msg.get("content").cloned().unwrap_or(json!(""));
+
+                // Mark this tool_use as resolved
+                pending_tool_use_ids.remove(tool_call_id);
 
                 // Convert content to string for Claude
                 let content_str = if content.is_string() {
@@ -535,6 +580,15 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                     "tool_use_id": tool_call_id,
                     "content": content_str
                 }));
+
+                // If all pending tool_use IDs are resolved, flush assistant content
+                if pending_tool_use_ids.is_empty() && !pending_assistant_content.is_empty() {
+                    sort_assistant_content(&mut pending_assistant_content);
+                    result.push(json!({
+                        "role": "assistant",
+                        "content": std::mem::take(&mut pending_assistant_content)
+                    }));
+                }
                 continue;
             }
             "assistant" => {
@@ -552,7 +606,9 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                     // Otherwise create a new user message
                     if let Some(last) = result.last_mut() {
                         if last.get("role").and_then(|r| r.as_str()) == Some("user") {
-                            if let Some(content) = last.get_mut("content").and_then(|c| c.as_array_mut()) {
+                            if let Some(content) =
+                                last.get_mut("content").and_then(|c| c.as_array_mut())
+                            {
                                 content.append(&mut pending_tool_results);
                             }
                         } else {
@@ -574,13 +630,20 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                 let content = msg.get("content").cloned().unwrap_or(json!(""));
                 if content.is_string() {
                     let text = content.as_str().unwrap_or("");
-                    if !text.is_empty() {
+                    // Skip empty or whitespace-only text (Bedrock rejects these)
+                    if !text.trim().is_empty() {
                         pending_assistant_content.push(json!({"type": "text", "text": text}));
                     }
                 } else if content.is_array() {
-                    // Already array format, add items
+                    // Already array format, add items (filtering whitespace-only text)
                     if let Some(arr) = content.as_array() {
                         for item in arr {
+                            // Skip text items that are empty or whitespace-only
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text")
+                                && let Some(text) = item.get("text").and_then(|t| t.as_str())
+                                    && text.trim().is_empty() {
+                                        continue;
+                                    }
                             pending_assistant_content.push(item.clone());
                         }
                     }
@@ -595,7 +658,8 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                         let call_id = tool_call
                             .get("id")
                             .and_then(|i| i.as_str())
-                            .unwrap_or("");
+                            .unwrap_or("")
+                            .to_string();
 
                         if let Some(func) = tool_call.get("function") {
                             let name = func.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -605,8 +669,10 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                                 .unwrap_or("{}");
 
                             // Parse arguments JSON string to Value
-                            let input: Value =
-                                serde_json::from_str(arguments).unwrap_or(json!({}));
+                            let input: Value = serde_json::from_str(arguments).unwrap_or(json!({}));
+
+                            // Track this tool_use ID as pending
+                            pending_tool_use_ids.insert(call_id.clone());
 
                             pending_assistant_content.push(json!({
                                 "type": "tool_use",
@@ -622,8 +688,18 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                 continue;
             }
             "user" => {
-                // Flush pending assistant content first (to maintain alternation)
-                if !pending_assistant_content.is_empty() {
+                // Only flush pending assistant content if there are no pending tool_use IDs
+                // Otherwise, user messages that appear between tool_call and tool_result
+                // would cause the assistant message to be emitted before the tool_result
+                if !pending_tool_use_ids.is_empty() {
+                    // Log warning: defensive handling is kicking in
+                    warn!(
+                        "User message encountered while {} tool_use IDs are pending: {:?}. Deferring assistant flush.",
+                        pending_tool_use_ids.len(),
+                        pending_tool_use_ids
+                    );
+                }
+                if pending_tool_use_ids.is_empty() && !pending_assistant_content.is_empty() {
                     sort_assistant_content(&mut pending_assistant_content);
                     result.push(json!({
                         "role": "assistant",
@@ -641,7 +717,8 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                 let content = msg.get("content").cloned().unwrap_or(json!(""));
                 if content.is_string() {
                     let text = content.as_str().unwrap_or("");
-                    if !text.is_empty() {
+                    // Skip empty or whitespace-only text (Bedrock rejects these)
+                    if !text.trim().is_empty() {
                         pending_user_content.push(json!({"type": "text", "text": text}));
                     }
                 } else if content.is_array() {
@@ -651,6 +728,11 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                             let item_type = item.get("type").and_then(|t| t.as_str());
                             match item_type {
                                 Some("text") => {
+                                    // Skip text items that are empty or whitespace-only
+                                    if let Some(text) = item.get("text").and_then(|t| t.as_str())
+                                        && text.trim().is_empty() {
+                                            continue;
+                                        }
                                     pending_user_content.push(item.clone());
                                 }
                                 Some("image_url") => {
@@ -659,9 +741,8 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                                         .get("image_url")
                                         .and_then(|u| u.get("url"))
                                         .and_then(|u| u.as_str())
-                                    {
-                                        if url.starts_with("data:") {
-                                            if let Some(comma_pos) = url.find(',') {
+                                        && url.starts_with("data:")
+                                            && let Some(comma_pos) = url.find(',') {
                                                 let header = &url[5..comma_pos];
                                                 let data = &url[comma_pos + 1..];
                                                 let media_type =
@@ -675,8 +756,6 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
                                                     }
                                                 }));
                                             }
-                                        }
-                                    }
                                 }
                                 _ => {
                                     pending_user_content.push(item.clone());
@@ -718,7 +797,96 @@ fn transform_messages_for_claude(messages: Vec<Value>) -> Vec<Value> {
         }));
     }
 
+    // Validate tool_use/tool_result pairing and log issues
+    validate_tool_pairing(&result);
+
     result
+}
+
+/// Validate that every tool_use has a corresponding tool_result in the next message.
+/// Logs detailed debug information for troubleshooting.
+fn validate_tool_pairing(messages: &[Value]) {
+    debug!("=== Claude Message Validation ===");
+    debug!("Total messages: {}", messages.len());
+
+    for (idx, msg) in messages.iter().enumerate() {
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+        let content = msg.get("content");
+
+        // Log message summary
+        let content_summary = if let Some(arr) = content.and_then(|c| c.as_array()) {
+            let types: Vec<&str> = arr
+                .iter()
+                .filter_map(|item| item.get("type").and_then(|t| t.as_str()))
+                .collect();
+            format!("{types:?}")
+        } else if let Some(s) = content.and_then(|c| c.as_str()) {
+            format!("text({})", s.len().min(50))
+        } else {
+            "null".to_string()
+        };
+        debug!("  [{}] role={}, content={}", idx, role, content_summary);
+
+        // Check for tool_use blocks
+        if let Some(arr) = content.and_then(|c| c.as_array()) {
+            let tool_use_ids: Vec<&str> = arr
+                .iter()
+                .filter_map(|item| {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        item.get("id").and_then(|i| i.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !tool_use_ids.is_empty() {
+                debug!("    tool_use ids: {:?}", tool_use_ids);
+
+                // Check next message for matching tool_results
+                if let Some(next_msg) = messages.get(idx + 1) {
+                    let next_role = next_msg.get("role").and_then(|r| r.as_str()).unwrap_or("?");
+                    if next_role != "user" {
+                        debug!(
+                            "    WARNING: Next message is role='{}', expected 'user' for tool_results",
+                            next_role
+                        );
+                    }
+
+                    if let Some(next_content) = next_msg.get("content").and_then(|c| c.as_array()) {
+                        let tool_result_ids: HashSet<&str> = next_content
+                            .iter()
+                            .filter_map(|item| {
+                                if item.get("type").and_then(|t| t.as_str()) == Some("tool_result")
+                                {
+                                    item.get("tool_use_id").and_then(|i| i.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        debug!("    tool_result ids in next msg: {:?}", tool_result_ids);
+
+                        // Check for missing tool_results
+                        for tool_id in &tool_use_ids {
+                            if !tool_result_ids.contains(tool_id) {
+                                debug!(
+                                    "    ERROR: tool_use id '{}' has no matching tool_result in next message!",
+                                    tool_id
+                                );
+                            }
+                        }
+                    } else {
+                        debug!("    WARNING: Next message has no array content for tool_results");
+                    }
+                } else {
+                    debug!("    ERROR: No message follows this tool_use block!");
+                }
+            }
+        }
+    }
+    debug!("=== End Validation ===");
 }
 
 #[cfg(test)]

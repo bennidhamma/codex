@@ -1,4 +1,5 @@
 use crate::render::line_utils::line_to_static;
+use crate::style::HIGHLIGHT;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_line;
 use pulldown_cmark::CodeBlockKind;
@@ -42,13 +43,13 @@ impl Default for MarkdownStyles {
             h4: Style::new().italic(),
             h5: Style::new().italic(),
             h6: Style::new().italic(),
-            code: Style::new().cyan(),
+            code: Style::new().fg(HIGHLIGHT),
             emphasis: Style::new().italic(),
             strong: Style::new().bold(),
             strikethrough: Style::new().crossed_out(),
             ordered_list_marker: Style::new().light_blue(),
             unordered_list_marker: Style::new(),
-            link: Style::new().cyan().underlined(),
+            link: Style::new().fg(HIGHLIGHT).underlined(),
             blockquote: Style::new().green(),
         }
     }

@@ -5,6 +5,7 @@ use ratatui::text::Span;
 use ratatui::text::Text;
 
 use crate::markdown_render::render_markdown_text;
+use crate::style::HIGHLIGHT;
 use insta::assert_snapshot;
 
 #[test]
@@ -601,7 +602,7 @@ fn ordered_item_with_indented_continuation_is_tight() {
 #[test]
 fn inline_code() {
     let text = render_markdown_text("Example of `Inline code`");
-    let expected = Line::from_iter(["Example of ".into(), "Inline code".cyan()]).into();
+    let expected = Line::from_iter(["Example of ".into(), Span::from("Inline code").fg(HIGHLIGHT)]).into();
     assert_eq!(text, expected);
 }
 
@@ -645,7 +646,7 @@ fn link() {
     let expected = Text::from(Line::from_iter([
         "Link".into(),
         " (".into(),
-        "https://example.com".cyan().underlined(),
+        Span::from("https://example.com").fg(HIGHLIGHT).underlined(),
         ")".into(),
     ]));
     assert_eq!(text, expected);

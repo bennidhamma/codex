@@ -1,3 +1,4 @@
+use crate::style::HIGHLIGHT;
 use std::cell::RefCell;
 use std::path::PathBuf;
 
@@ -104,7 +105,7 @@ impl FeedbackNoteView {
                 if let Some(url) = issue_url {
                     lines.extend([
                         "".into(),
-                        Line::from(vec!["  ".into(), url.cyan().underlined()]),
+                        Line::from(vec!["  ".into(), url.fg(HIGHLIGHT).underlined()]),
                         "".into(),
                         Line::from(vec![
                             "  Or mention your thread ID ".into(),
@@ -302,7 +303,7 @@ impl FeedbackNoteView {
 }
 
 fn gutter() -> Span<'static> {
-    "▌ ".cyan()
+    "▌ ".fg(HIGHLIGHT)
 }
 
 fn feedback_title_and_placeholder(category: FeedbackCategory) -> (String, String) {

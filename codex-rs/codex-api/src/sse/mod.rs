@@ -1,4 +1,5 @@
 pub mod bedrock;
+pub mod bedrock_stream;
 pub mod chat;
 pub mod responses;
 

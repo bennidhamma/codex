@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+use crate::style::HIGHLIGHT;
 
 use codex_core::AuthManager;
 use codex_core::auth::AuthCredentialsStoreMode;
@@ -197,8 +198,8 @@ impl AuthModeWidget {
 
             let line1 = if is_selected {
                 Line::from(vec![
-                    format!("{} {}. ", caret, idx + 1).cyan().dim(),
-                    text.to_string().cyan(),
+                    format!("{} {}. ", caret, idx + 1).fg(HIGHLIGHT).dim(),
+                    text.to_string().fg(HIGHLIGHT),
                 ])
             } else {
                 format!("  {}. {text}", idx + 1).into()
@@ -206,7 +207,7 @@ impl AuthModeWidget {
 
             let line2 = if is_selected {
                 Line::from(format!("     {description}"))
-                    .fg(Color::Cyan)
+                    .fg(HIGHLIGHT)
                     .add_modifier(Modifier::DIM)
             } else {
                 Line::from(format!("     {description}"))
@@ -277,7 +278,9 @@ impl AuthModeWidget {
         {
             lines.push("  If the link doesn't open automatically, open the following link to authenticate:".into());
             lines.push("".into());
-            lines.push(Line::from(state.auth_url.as_str().cyan().underlined()));
+            lines.push(Line::from(
+                state.auth_url.as_str().fg(HIGHLIGHT).underlined(),
+            ));
             lines.push("".into());
         }
 
@@ -310,7 +313,7 @@ impl AuthModeWidget {
             ])
             .dim(),
             "".into(),
-            "  Press Enter to continue".fg(Color::Cyan).into(),
+            "  Press Enter to continue".fg(HIGHLIGHT).into(),
         ];
 
         Paragraph::new(lines)
@@ -384,7 +387,7 @@ impl AuthModeWidget {
                     .title("API key")
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::Cyan)),
+                    .border_style(Style::default().fg(HIGHLIGHT)),
             )
             .render(input_area, buf);
 

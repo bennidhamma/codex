@@ -2,6 +2,7 @@ use crate::history_cell::CompositeHistoryCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::with_border_with_inner_width;
+use crate::style::HIGHLIGHT;
 use crate::version::CODEX_CLI_VERSION;
 use chrono::DateTime;
 use chrono::Local;
@@ -355,14 +356,14 @@ impl HistoryCell for StatusHistoryCell {
         let value_width = formatter.value_width(available_inner_width);
 
         let note_first_line = Line::from(vec![
-            Span::from("Visit ").cyan(),
+            Span::from("Visit ").fg(HIGHLIGHT),
             "https://chatgpt.com/codex/settings/usage"
-                .cyan()
+                .fg(HIGHLIGHT)
                 .underlined(),
-            Span::from(" for up-to-date").cyan(),
+            Span::from(" for up-to-date").fg(HIGHLIGHT),
         ]);
         let note_second_line = Line::from(vec![
-            Span::from("information on rate limits and credits").cyan(),
+            Span::from("information on rate limits and credits").fg(HIGHLIGHT),
         ]);
         let note_lines = word_wrap_lines(
             [note_first_line, note_second_line],

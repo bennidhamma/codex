@@ -70,13 +70,11 @@ impl<T: HttpTransport, A: AuthProvider> ChatClient<T, A> {
     fn path(&self, model: Option<&str>) -> String {
         let provider = self.streaming.provider();
 
-        // Bedrock uses /model/{modelId}/invoke for non-streaming
-        // TODO: Implement AWS event stream parsing for streaming support
-        if provider.is_claude_provider() {
-            if let Some(model_id) = model {
-                return format!("model/{}/invoke", model_id);
+        // Bedrock uses /model/{modelId}/invoke-with-response-stream for streaming
+        if provider.is_claude_provider()
+            && let Some(model_id) = model {
+                return format!("model/{model_id}/invoke-with-response-stream");
             }
-        }
 
         match provider.wire {
             WireApi::Chat => "chat/completions".to_string(),
