@@ -9,6 +9,8 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub mod event_processor_with_jsonl_output;
 pub mod exec_events;
+mod persistence;
+mod task_mode;
 
 pub use cli::Cli;
 pub use cli::Command;
@@ -72,6 +74,14 @@ pub async fn run_main(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> any
         tracing::warn!(?err, "Failed to set codex exec originator override {err:?}");
     }
 
+    if let Some(task_env) = task_mode::TaskEnv::from_env()? {
+        return task_mode::run_task_mode(cli, codex_linux_sandbox_exe, task_env).await;
+    }
+
+    run_exec_mode(cli, codex_linux_sandbox_exe).await
+}
+
+async fn run_exec_mode(cli: Cli, codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
     let Cli {
         command,
         images,

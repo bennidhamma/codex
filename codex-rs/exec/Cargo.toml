@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-arg0 = { workspace = true }
 codex-common = { workspace = true, features = [
@@ -27,12 +28,21 @@ codex-common = { workspace = true, features = [
 codex-core = { workspace = true }
 codex-protocol = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
+deadpool-postgres = { workspace = true }
+futures = { workspace = true }
 mcp-types = { workspace = true }
 owo-colors = { workspace = true }
+redis = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 shlex = { workspace = true }
 supports-color = { workspace = true }
+tokio-postgres = { workspace = true, features = [
+    "with-chrono-0_4",
+    "with-serde_json-1",
+    "with-uuid-1",
+] }
+toml = { workspace = true }
 tokio = { workspace = true, features = [
     "io-std",
     "macros",
@@ -47,6 +57,7 @@ ts-rs = { workspace = true, features = [
     "serde-json-impl",
     "no-serde-warnings",
 ] }
+uuid = { workspace = true }
 
 
 [dev-dependencies]
