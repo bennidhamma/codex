@@ -58,6 +58,7 @@ async fn spawn_command_under_sandbox(
 
 #[tokio::test]
 async fn python_multiprocessing_lock_works_under_sandbox() {
+    core_test_support::skip_if_no_landlock!();
     core_test_support::skip_if_sandbox!();
     #[cfg(target_os = "macos")]
     let writable_roots = Vec::<AbsolutePathBuf>::new();
@@ -113,6 +114,7 @@ if __name__ == '__main__':
 
 #[tokio::test]
 async fn python_getpwuid_works_under_sandbox() {
+    core_test_support::skip_if_no_landlock!();
     core_test_support::skip_if_sandbox!();
 
     if std::process::Command::new("python3")
@@ -152,6 +154,7 @@ async fn python_getpwuid_works_under_sandbox() {
 
 #[tokio::test]
 async fn sandbox_distinguishes_command_and_policy_cwds() {
+    core_test_support::skip_if_no_landlock!();
     core_test_support::skip_if_sandbox!();
     let temp = tempfile::tempdir().expect("should be able to create temp dir");
     let sandbox_root = temp.path().join("sandbox");
@@ -308,6 +311,7 @@ fn unix_sock_body() {
 
 #[tokio::test]
 async fn allow_unix_socketpair_recvfrom() {
+    core_test_support::skip_if_no_landlock!();
     run_code_under_sandbox(
         "allow_unix_socketpair_recvfrom",
         &SandboxPolicy::ReadOnly,
